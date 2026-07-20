@@ -36,7 +36,7 @@ data "aws_iam_policy_document" "github_assume_role" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:${var.github_owner}/${var.github_repository}:*"
+        "repo:michellebusiness@267864506/eks-namegen-final-project@1306820647:ref:refs/heads/main"
       ]
     }
   }
