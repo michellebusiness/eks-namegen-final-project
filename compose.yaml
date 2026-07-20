@@ -1,0 +1,33 @@
+services:
+  mongodb:
+    image: mongo:3.6
+    container_name: namegen-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_DATABASE: namegen
+    volumes:
+      - mongodb-data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - namegen-network
+
+  app:
+    build: .
+    image: namegen-app:local
+    container_name: namegen-app
+    environment:
+      MONGODB_URL: mongodb://genuser:password@mongodb/namegen
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongodb
+    networks:
+      - namegen-network
+
+volumes:
+  mongodb-data:
+
+networks:
+  namegen-network:

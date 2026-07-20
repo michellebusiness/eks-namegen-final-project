@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log*
+.env
+.git
+.github
+terraform
+k8s
+architecture
+screenshots
