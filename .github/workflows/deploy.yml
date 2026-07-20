@@ -1,0 +1,103 @@
+name: Build and Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: namegen
+  EKS_CLUSTER_NAME: namegen-eks-auto
+  K8S_NAMESPACE: namegen
+
+jobs:
+  build-and-deploy:
+    name: Build, Push and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Configure temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::771650096212:role/namegen-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: namegen-github-actions
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
+            .
+
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      - name: Create namespace and MongoDB secret
+        env:
+          ROOT_PASSWORD: ${{ secrets.MONGODB_ROOT_PASSWORD }}
+          APP_PASSWORD: ${{ secrets.MONGODB_APP_PASSWORD }}
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+
+          kubectl create secret generic mongodb-secret \
+            --namespace "$K8S_NAMESPACE" \
+            --from-literal=MONGO_INITDB_ROOT_USERNAME=root \
+            --from-literal=MONGO_INITDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+            --from-literal=MONGO_APP_USERNAME=genuser \
+            --from-literal=MONGO_APP_PASSWORD="$APP_PASSWORD" \
+            --from-literal=MONGO_INITDB_DATABASE=namegen \
+            --from-literal=MONGODB_URL="mongodb://genuser:$APP_PASSWORD@mongodb/namegen" \
+            --dry-run=client \
+            -o yaml |
+          kubectl apply -f -
+
+      - name: Deploy Kubernetes resources
+        run: |
+          kubectl apply -f k8s/storage-class.yaml
+          kubectl apply -f k8s/mongodb-init.yaml
+          kubectl apply -f k8s/mongodb-services.yaml
+          kubectl apply -f k8s/mongodb-statefulset.yaml
+          kubectl apply -f k8s/app-service.yaml
+          kubectl apply -f k8s/app-deployment.yaml
+
+      - name: Deploy new application image
+        run: |
+          kubectl set image \
+            deployment/namegen \
+            namegen="$IMAGE_URI" \
+            --namespace "$K8S_NAMESPACE"
+
+          kubectl rollout status \
+            deployment/namegen \
+            --namespace "$K8S_NAMESPACE" \
+            --timeout=5m
+
+      - name: Show deployment status
+        run: |
+          kubectl get pods,services,pvc \
+            --namespace "$K8S_NAMESPACE"

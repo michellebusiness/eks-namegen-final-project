@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: namegen
+spec:
+  serviceName: mongodb-headless
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: mongodb
+
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:3.6
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: mongodb
+              containerPort: 27017
+
+          envFrom:
+            - secretRef:
+                name: mongodb-secret
+
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+
+          readinessProbe:
+            tcpSocket:
+              port: mongodb
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          livenessProbe:
+            tcpSocket:
+              port: mongodb
+            initialDelaySeconds: 30
+            periodSeconds: 20
+
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+
+            - name: mongodb-init
+              mountPath: /docker-entrypoint-initdb.d
+
+      volumes:
+        - name: mongodb-init
+          configMap:
+            name: mongodb-init
+            defaultMode: 0755
+
+  volumeClaimTemplates:
+    - metadata:
+        name: mongodb-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+
+        storageClassName: auto-ebs-sc
+
+        resources:
+          requests:
+            storage: 5Gi
